@@ -12,6 +12,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { getIpLocation, getOwnLocation } from "../api";
+import { isPrivateOrLocalIp } from "../utils/ip";
 import type { GeoLocation, GeoMarker, NetworkEvent } from "../types";
 
 type WorldMapProps = {
@@ -68,11 +69,7 @@ function WorldMap({ events }: WorldMapProps) {
               (ip) =>
                 ip &&
                 ip !== "Unknown" &&
-                !ip.startsWith("127.") &&
-                ip !== "::1" &&
-                !ip.startsWith("192.168.") &&
-                !ip.startsWith("10.") &&
-                !ip.startsWith("172.16."),
+                !isPrivateOrLocalIp(ip),
             ),
         ),
       ].sort(),
@@ -168,22 +165,27 @@ function WorldMap({ events }: WorldMapProps) {
   // ------------------------------------------------------------
 
   return (
-    <section className="world-map-section">
-      <h2>Global Network Activity</h2>
+    <section className="card world-map-section">
+      <div className="card-header">
+        <h2 className="card-title">Global Network Activity</h2>
+        <span className="card-meta">
+          {deviceMarker ? markers.length + 1 : markers.length} locations
+        </span>
+      </div>
 
       <div className="world-map-container">
         <MapContainer
           center={[20, 0]}
           zoom={2}
           minZoom={2}
-          style={{
-            width: "100%",
-            height: "600px",
-          }}
+          className="world-map-leaflet"
         >
+          {/* Esri's World Dark Gray Canvas — a genuinely dark, keyless
+              raster basemap. Carto's dark tiles now watermark without
+              an API key, and OSM's standard tiles are light-only. */}
           <TileLayer
-            attribution="&copy; OpenStreetMap contributors"
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='Tiles &copy; Esri — Source: Esri, HERE, Garmin, FAO, NOAA, USGS'
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
           />
 
           {deviceMarker && (
