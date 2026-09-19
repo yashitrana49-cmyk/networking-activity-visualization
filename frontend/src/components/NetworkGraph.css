@@ -1,0 +1,10 @@
+.graph-section {
+    margin-top: 40px;
+}
+
+.graph-container {
+    height: 550px;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    overflow: hidden;
+}

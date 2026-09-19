@@ -1,0 +1,7 @@
+# Development / test dependencies for the backend.
+# Includes the runtime requirements, so a single
+#   pip install -r requirements-dev.txt
+# sets up everything needed to develop and test.
+-r requirements.txt
+
+pytest>=8.4

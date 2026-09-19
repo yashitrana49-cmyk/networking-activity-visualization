@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Network Activity Visualizer Collector",
+  "version": "1.0.0",
+  "description": "Collects browser navigation and request metadata for the Network Activity Visualizer.",
+
+  "permissions": [
+    "webNavigation",
+    "webRequest",
+    "tabs"
+  ],
+
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  }
+}

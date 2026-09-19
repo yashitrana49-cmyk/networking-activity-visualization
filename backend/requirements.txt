@@ -1,0 +1,6 @@
+fastapi>=0.141
+uvicorn>=0.53
+scapy>=2.7
+psutil>=7.2
+requests>=2.34
+pydantic>=2.13
