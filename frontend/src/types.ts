@@ -6,6 +6,13 @@ export type NetworkEvent = {
   protocol: string;
   port: number;
   state: string;
+
+  /** Only set for packet-level flows (ICMP, IGMP, GRE, ...). */
+  packets?: number;
+  bytes?: number;
+
+  /** Local port of the socket (0 for packet-level flows). */
+  local_port?: number;
 };
 
 export type BrowserEvent = {
@@ -53,4 +60,11 @@ export type GeoMarker = {
   position: [number, number];
   color: string;
   popup: string;
+};
+
+export type UploadInfo = {
+  loaded: boolean;
+  filename: string;
+  event_count: number;
+  error: string;
 };

@@ -1,20 +1,48 @@
 import NetworkGraph from "./components/NetworkGraph";
+import NavBar from "./components/NavBar";
+import QuitOverlay from "./components/QuitOverlay";
 import { useEffect, useRef, useState } from "react";
-import { getEvents, getLiveEvents, getBrowserEvents, getDnsEvents, clearHistory } from "./api";
+import {
+  getLiveEvents,
+  getLogEvents,
+  getLogStatus,
+  getBrowserEvents,
+  getDnsEvents,
+  clearHistory,
+  clearLogs,
+  quitApp,
+} from "./api";
 import WorldMap from "./components/WorldMap";
-import type { NetworkEvent, BrowserEvent, DnsEvent } from "./types";
+import type { NetworkEvent, BrowserEvent, DnsEvent, UploadInfo } from "./types";
 import { isPrivateOrLocalIp } from "./utils/ip";
 
+/**
+ * Badge colors for the protocols we know about. Socket-table
+ * events report TCP/UDP/RAW; packet-level flows can be any IP
+ * protocol (ICMP, IGMP, GRE, ESP, SCTP, IP-<number>...); log
+ * events may carry anything, including OTHER.
+ */
 const PROTOCOL_BADGE: Record<string, string> = {
   TCP: "badge-blue",
   UDP: "badge-violet",
   RAW: "badge-amber",
+  ICMP: "badge-amber",
+  ICMPv6: "badge-amber",
+  IGMP: "badge-rose",
+  GRE: "badge-rose",
+  ESP: "badge-rose",
+  AH: "badge-rose",
+  OSPF: "badge-rose",
+  PIM: "badge-rose",
+  VRRP: "badge-rose",
+  SCTP: "badge-rose",
 };
 
 /** Stable positive states get green, everything else gray. */
 const STATE_BADGE: Record<string, string> = {
   ESTABLISHED: "badge-green",
   UDP: "badge-violet",
+  PACKETS: "badge-violet",
 };
 
 function protocolBadge(protocol: string) {
@@ -39,26 +67,41 @@ function formatTime(timestamp: string) {
   });
 }
 
+const EMPTY_LOG_STATUS: UploadInfo = {
+  loaded: false,
+  filename: "",
+  event_count: 0,
+  error: "",
+};
+
 function App() {
   const [events, setEvents] = useState<NetworkEvent[]>([]);
   const [browserEvents, setBrowserEvents] = useState<BrowserEvent[]>([]);
   const [dnsEvents, setDnsEvents] = useState<DnsEvent[]>([]);
   const [selectedProcess, setSelectedProcess] = useState("All");
-  const [dataSource, setDataSource] = useState<"sample" | "live">("sample");
+  const [dataSource, setDataSource] = useState<"log" | "live">("log");
+  const [logStatus, setLogStatus] = useState<UploadInfo>(EMPTY_LOG_STATUS);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [quitting, setQuitting] = useState(false);
   const [showLocalConnections, setShowLocalConnections] = useState(true);
   const [refreshNumber, setRefreshNumber] = useState(0);
+  const [logRefreshNumber, setLogRefreshNumber] = useState(0);
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
   const knownEventKeys = useRef<Set<string>>(new Set());
   const [newEventKeys, setNewEventKeys] = useState<Set<string>>(new Set());
 
-  /** Stable identity for a network event row. */
+  /** Stable identity for a network event row. The local port
+   * tells apart parallel connections to the same destination;
+   * packet flows have no port, so packets/bytes count in. */
   const eventKey = (event: NetworkEvent) =>
-    `${event.timestamp}-${event.process_name}-${event.destination_ip}-${event.port}`;
+    event.packets !== undefined
+      ? `pkt-${event.protocol}-${event.destination_ip}`
+      : `${event.timestamp}-${event.process_name}-${event.destination_ip}-${event.port}-${event.local_port ?? 0}`;
 
   useEffect(() => {
-    const loadEvents = dataSource === "sample" ? getEvents : getLiveEvents;
+    const loadEvents = dataSource === "log" ? getLogEvents : getLiveEvents;
 
     const fetchEvents = () => {
       loadEvents()
@@ -93,9 +136,27 @@ function App() {
 
       return () => clearInterval(intervalId);
     }
-  }, [dataSource, refreshNumber]);
+  }, [dataSource, refreshNumber, logRefreshNumber]);
+
+  // Restore the upload state (e.g. after a page reload while
+  // the backend still holds a parsed log).
+  useEffect(() => {
+    if (dataSource !== "log") {
+      return;
+    }
+
+    getLogStatus()
+      .then(setLogStatus)
+      .catch(() => {
+        /* status is cosmetic; ignore failures */
+      });
+  }, [dataSource, logRefreshNumber]);
 
   useEffect(() => {
+    if (dataSource !== "live") {
+      return;
+    }
+
     const loadBrowserEvents = () => {
       getBrowserEvents()
         .then((loadedEvents) => {
@@ -106,16 +167,6 @@ function App() {
         });
     };
 
-    loadBrowserEvents();
-
-    if (dataSource === "live") {
-      const intervalId = setInterval(loadBrowserEvents, 1000);
-
-      return () => clearInterval(intervalId);
-    }
-  }, [dataSource]);
-
-  useEffect(() => {
     const loadDnsEvents = () => {
       getDnsEvents()
         .then((loadedEvents) => {
@@ -126,15 +177,17 @@ function App() {
         });
     };
 
+    loadBrowserEvents();
     loadDnsEvents();
 
-    if (dataSource === "live") {
-      const intervalId = setInterval(loadDnsEvents, 1000);
+    const intervalId = setInterval(() => {
+      loadBrowserEvents();
+      loadDnsEvents();
+    }, 1000);
 
-      return () => clearInterval(intervalId);
-    }
+    return () => clearInterval(intervalId);
   }, [dataSource]);
-  
+
   // Retire the flash class once the animation has played.
   useEffect(() => {
     if (newEventKeys.size === 0) {
@@ -165,6 +218,72 @@ function App() {
     } else {
       shouldAutoScroll.current = false;
     }
+  };
+
+  const handleLogLoaded = (filename: string, eventCount: number) => {
+    setLogStatus({
+      loaded: eventCount > 0,
+      filename,
+      event_count: eventCount,
+      error: "",
+    });
+    setNotice(
+      eventCount > 0
+        ? `Loaded ${filename} — ${eventCount} events parsed.`
+        : `${filename} parsed, but no network events were found in it.`,
+    );
+    setError("");
+    setSelectedProcess("All");
+    setDataSource("log");
+    setLogRefreshNumber((value) => value + 1);
+  };
+
+  const handleLogError = (message: string) => {
+    setError(message);
+    setNotice("");
+  };
+
+  const handleClearLog = async () => {
+    try {
+      await clearLogs();
+
+      setLogStatus(EMPTY_LOG_STATUS);
+      setEvents([]);
+      setBrowserEvents([]);
+      setDnsEvents([]);
+      setSelectedProcess("All");
+      setNotice("Loaded log removed.");
+      setLogRefreshNumber((value) => value + 1);
+    } catch (clearError) {
+      console.error("Failed to clear the log:", clearError);
+      setError("Failed to clear the loaded log.");
+    }
+  };
+
+  const handleClearLiveHistory = async () => {
+    try {
+      await clearHistory();
+
+      setEvents([]);
+      setBrowserEvents([]);
+      setDnsEvents([]);
+      setNotice("Live history cleared.");
+      setRefreshNumber((value) => value + 1);
+    } catch (clearError) {
+      console.error("Failed to clear history:", clearError);
+      setError("Failed to clear live history.");
+    }
+  };
+
+  const handleQuit = async () => {
+    try {
+      await quitApp();
+    } catch {
+      // The backend drops the connection mid-shutdown; that
+      // is expected and still counts as quitting.
+    }
+
+    setQuitting(true);
   };
 
   const processes = [
@@ -232,12 +351,40 @@ function App() {
       };
     }, [events]);
 
+  if (quitting) {
+    return (
+      <QuitOverlay
+        message="The backend has been stopped. You can close this window now."
+      />
+    );
+  }
+
   return (
     <main>
+      <NavBar
+        dataSource={dataSource}
+        onDataSourceChange={(source) => {
+          setDataSource(source);
+          setNotice("");
+          setError("");
+        }}
+        logFileName={logStatus.filename}
+        logEventCount={logStatus.event_count}
+        onLogLoaded={handleLogLoaded}
+        onLogError={handleLogError}
+        onClearLog={handleClearLog}
+        onClearLiveHistory={handleClearLiveHistory}
+        onQuit={handleQuit}
+      />
+
       <header className="app-header">
         <div className="app-title">
           <h1>Network Activity Visualizer</h1>
-          <p>Recent connections detected on this device.</p>
+          <p>
+            {dataSource === "log"
+              ? "Studying an uploaded network log."
+              : "Recent connections detected on this device."}
+          </p>
         </div>
 
         <span
@@ -247,37 +394,17 @@ function App() {
           title={
             dataSource === "live"
               ? "Polling the backend every second"
-              : "Showing bundled sample data"
+              : logStatus.loaded
+                ? `Loaded log: ${logStatus.filename}`
+                : "No log loaded yet"
           }
         >
           <span className="status-dot" />
-          {dataSource === "live" ? "Live" : "Sample"}
+          {dataSource === "live" ? "Live" : "Log"}
         </span>
       </header>
 
       <div className="toolbar">
-        <div className="field">
-          <span className="field-label">Data source</span>
-          <div className="segmented" role="group" aria-label="Data source">
-            <button
-              type="button"
-              className={dataSource === "sample" ? "is-active" : ""}
-              aria-pressed={dataSource === "sample"}
-              onClick={() => setDataSource("sample")}
-            >
-              Sample
-            </button>
-            <button
-              type="button"
-              className={dataSource === "live" ? "is-active" : ""}
-              aria-pressed={dataSource === "live"}
-              onClick={() => setDataSource("live")}
-            >
-              Live
-            </button>
-          </div>
-        </div>
-
         <div className="field">
           <label className="field-label" htmlFor="process-filter">
             Application
@@ -296,28 +423,6 @@ function App() {
           </select>
         </div>
 
-        {dataSource === "live" && (
-          <button
-            type="button"
-            className="btn"
-            onClick={async () => {
-              try {
-                await clearHistory();
-
-                setEvents([]);
-                setBrowserEvents([]);
-                setDnsEvents([]);
-
-                setRefreshNumber((value) => value + 1);
-              } catch (clearError) {
-                console.error("Failed to clear history:", clearError);
-              }
-            }}
-          >
-            Clear history
-          </button>
-        )}
-
         <label className="switch">
           <input
             type="checkbox"
@@ -332,6 +437,7 @@ function App() {
       </div>
 
       {error && <p className="error-banner">{error}</p>}
+      {notice && !error && <p className="notice-banner">{notice}</p>}
 
       <div className="stack">
         <section className="card">
@@ -355,13 +461,18 @@ function App() {
               <th>Protocol</th>
               <th>Port</th>
               <th>State</th>
+              <th>Packets</th>
             </tr>
           </thead>
 
           <tbody>
             {visibleEvents.length === 0 && (
               <tr className="empty-row">
-                <td colSpan={7}>No connections match the current filters.</td>
+                <td colSpan={8}>
+                  {dataSource === "log" && !logStatus.loaded
+                    ? "Upload a network log file to study it here."
+                    : "No connections match the current filters."}
+                </td>
               </tr>
             )}
 
@@ -379,11 +490,14 @@ function App() {
                     {event.protocol}
                   </span>
                 </td>
-                <td className="cell-mono">{event.port}</td>
+                <td className="cell-mono">{event.port || "—"}</td>
                 <td>
                   <span className={`badge ${stateBadge(event.state)}`}>
                     {event.state}
                   </span>
+                </td>
+                <td className="cell-mono">
+                  {event.packets !== undefined ? `${event.packets} pkt` : ""}
                 </td>
               </tr>
             ))}
@@ -392,81 +506,83 @@ function App() {
         </div>
         </section>
 
-        <section className="card browser-activity">
-          <div className="card-header">
-            <h2 className="card-title">Browser Activity</h2>
-            <span className="card-meta">{browserEvents.length} requests</span>
-          </div>
-
-          {browserEvents.length === 0 ? (
-            <div className="empty-state">
-              <p>No browser activity detected.</p>
-              <span>Load the extension and browse to see requests here.</span>
+        {dataSource === "live" && (
+          <section className="card browser-activity">
+            <div className="card-header">
+              <h2 className="card-title">Browser Activity</h2>
+              <span className="card-meta">{browserEvents.length} requests</span>
             </div>
-          ) : (
-            <div className="browser-activity-list">
-            {browserEvents
-              .filter(
-                (event) =>
-                  event.page_domain &&
-                  event.page_domain !== "Unknown" &&
-                  event.page_domain !== "localhost",
-              )
-              .map((event, index) => (
-                <div
-                  className="browser-event"
-                  key={`${event.timestamp}-${event.tab_id}-${event.domain}-${event.path}-${index}`}
-                >
-                  {/* PAGE */}
 
-                  <div className="browser-event-header">
-                    <strong>{event.page_domain}</strong>
+            {browserEvents.length === 0 ? (
+              <div className="empty-state">
+                <p>No browser activity detected.</p>
+                <span>Load the extension and browse to see requests here.</span>
+              </div>
+            ) : (
+              <div className="browser-activity-list">
+              {browserEvents
+                .filter(
+                  (event) =>
+                    event.page_domain &&
+                    event.page_domain !== "Unknown" &&
+                    event.page_domain !== "localhost",
+                )
+                .map((event, index) => (
+                  <div
+                    className="browser-event"
+                    key={`${event.timestamp}-${event.tab_id}-${event.domain}-${event.path}-${index}`}
+                  >
+                    {/* PAGE */}
 
-                    <span>
-                      {new Date(event.timestamp).toLocaleTimeString()}
-                    </span>
+                    <div className="browser-event-header">
+                      <strong>{event.page_domain}</strong>
+
+                      <span>
+                        {new Date(event.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+
+                    {/* REQUEST DETAILS */}
+
+                    <div className="browser-event-request">
+                      <div>
+                        <span className="browser-label">Request</span>
+
+                        <strong>{event.domain}</strong>
+                      </div>
+
+                      <div>
+                        <span className="browser-label">Path</span>
+
+                        <span>{event.path || "/"}</span>
+                      </div>
+
+                      <div>
+                        <span className="browser-label">Method</span>
+
+                        <span>{event.method}</span>
+                      </div>
+
+                      <div>
+                        <span className="browser-label">Type</span>
+
+                        <span>{event.resource_type}</span>
+                      </div>
+                    </div>
                   </div>
-
-                  {/* REQUEST DETAILS */}
-
-                  <div className="browser-event-request">
-                    <div>
-                      <span className="browser-label">Request</span>
-
-                      <strong>{event.domain}</strong>
-                    </div>
-
-                    <div>
-                      <span className="browser-label">Path</span>
-
-                      <span>{event.path || "/"}</span>
-                    </div>
-
-                    <div>
-                      <span className="browser-label">Method</span>
-
-                      <span>{event.method}</span>
-                    </div>
-
-                    <div>
-                      <span className="browser-label">Type</span>
-
-                      <span>{event.resource_type}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-          </div>
+                ))}
+            </div>
+          )}
+          </section>
         )}
-        </section>
 
         <NetworkGraph
           events={visibleEvents}
-          browserEvents={browserEvents}
-          dnsEvents={dnsEvents}
+          browserEvents={dataSource === "live" ? browserEvents : []}
+          dnsEvents={dataSource === "live" ? dnsEvents : []}
         />
 
-        <WorldMap events={visibleEvents} />
+        {dataSource === "live" && <WorldMap events={visibleEvents} />}
       </div>
     </main>
   );

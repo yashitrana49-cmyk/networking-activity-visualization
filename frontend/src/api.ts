@@ -3,7 +3,10 @@ import type {
   BrowserEvent,
   DnsEvent,
   GeoLocation,
+  UploadInfo,
 } from "./types";
+
+export type { UploadInfo };
 
 // Single place where the backend location is configured.
 // Set VITE_API_URL in .env (see .env.example); it must be
@@ -12,6 +15,13 @@ const API_BASE = (import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000").repla
   /\/+$/,
   "",
 );
+
+export type UploadResult = {
+  status: string;
+  filename?: string;
+  event_count?: number;
+  error?: string;
+};
 
 async function getJson<T>(path: string, errorMessage: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`);
@@ -23,8 +33,51 @@ async function getJson<T>(path: string, errorMessage: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function getEvents(): Promise<NetworkEvent[]> {
-  return getJson<NetworkEvent[]>("/events", "Could not load sample network events.");
+export async function getLogEvents(): Promise<NetworkEvent[]> {
+  return getJson<NetworkEvent[]>("/events/log", "Could not load log events.");
+}
+
+export async function getLogStatus(): Promise<UploadInfo> {
+  return getJson<UploadInfo>("/logs/status", "Could not load log status.");
+}
+
+export async function uploadLogFile(
+  filename: string,
+  content: string,
+): Promise<UploadResult> {
+  const response = await fetch(`${API_BASE}/logs/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, content }),
+  });
+
+  const result = (await response.json()) as UploadResult;
+
+  if (!response.ok) {
+    throw new Error(result.error ?? `Upload failed (${response.status})`);
+  }
+
+  return result;
+}
+
+export async function clearLogs(): Promise<void> {
+  const response = await fetch(`${API_BASE}/logs/clear`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to clear the loaded log (${response.status})`);
+  }
+}
+
+export async function quitApp(): Promise<void> {
+  const response = await fetch(`${API_BASE}/app/quit`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Quit request failed (${response.status})`);
+  }
 }
 
 export async function getLiveEvents(): Promise<NetworkEvent[]> {

@@ -1,3 +1,4 @@
+import os
 import threading
 
 from dns_monitor import (
@@ -10,6 +11,18 @@ from collector import (
     collect_live_connections,
     clear_event_history,
 )
+from packet_monitor import (
+    clear_packet_flows,
+    get_packet_flow_events,
+    start_packet_monitor,
+)
+from log_loader import (
+    clear_log_events,
+    get_log_events,
+    get_upload_info,
+    load_log_file,
+)
+from fastapi.responses import JSONResponse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -56,99 +69,91 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/events")
-def get_events():
-    return [
-        {
-            "timestamp": "2026-09-19T09:00:00Z",
-            "process_name": "chrome.exe",
-            "domain": "google.com",
-            "destination_ip": "142.250.195.14",
-            "protocol": "TCP",
-            "port": 443,
-        },
-        {
-            "timestamp": "2026-09-19T09:02:10Z",
-            "process_name": "chrome.exe",
-            "domain": "youtube.com",
-            "destination_ip": "142.250.183.46",
-            "protocol": "TCP",
-            "port": 443,
-        },
-        {
-            "timestamp": "2026-09-19T09:05:23Z",
-            "process_name": "Code.exe",
-            "domain": "github.com",
-            "destination_ip": "140.82.112.4",
-            "protocol": "TCP",
-            "port": 443,
-        },
-        {
-            "timestamp": "2026-09-19T09:08:42Z",
-            "process_name": "Discord.exe",
-            "domain": "discord.com",
-            "destination_ip": "162.159.136.232",
-            "protocol": "UDP",
-            "port": 443,
-        },
-        {
-            "timestamp": "2026-09-19T09:11:08Z",
-            "process_name": "chrome.exe",
-            "domain": "doubleclick.net",
-            "destination_ip": "142.250.70.14",
-            "protocol": "TCP",
-            "port": 443,
-        },
-        {
-            "timestamp": "2026-09-19T09:15:30Z",
-            "process_name": "Spotify.exe",
-            "domain": "spotify.com",
-            "destination_ip": "104.199.65.124",
-            "protocol": "TCP",
-            "port": 443,
-        },
-        {
-            "timestamp": "2026-09-19T09:20:15Z",
-            "process_name": "OneDrive.exe",
-            "domain": "onedrive.live.com",
-            "destination_ip": "13.107.42.12",
-            "protocol": "TCP",
-            "port": 443,
-        },
-        {
-            "timestamp": "2026-09-19T09:25:50Z",
-            "process_name": "chrome.exe",
-            "domain": "cloudflare.com",
-            "destination_ip": "104.16.132.229",
-            "protocol": "TCP",
-            "port": 443,
-        },
-        {
-            "timestamp": "2026-09-19T09:31:12Z",
-            "process_name": "Teams.exe",
-            "domain": "teams.microsoft.com",
-            "destination_ip": "52.112.250.196",
-            "protocol": "UDP",
-            "port": 3478,
-        },
-        {
-            "timestamp": "2026-09-19T09:36:45Z",
-            "process_name": "chrome.exe",
-            "domain": "example.com",
-            "destination_ip": "93.184.216.34",
-            "protocol": "TCP",
-            "port": 443,
-        },
-    ]
+
+@app.get("/logs/status")
+def logs_status():
+    return get_upload_info()
+
+@app.get("/events/log")
+def get_events_from_log():
+    return get_log_events()
+
+@app.post("/logs/upload")
+def upload_log(payload: dict):
+    """
+    Load a log file (JSON, JSONL, CSV or plain text) as the
+    event source. The client sends {filename, content} with
+    the file read as text.
+    """
+    filename = str(payload.get("filename") or "log.txt")
+
+    content = payload.get("content")
+
+    if not isinstance(content, str):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "error": "Missing 'content' string.",
+            },
+        )
+
+    count, error = load_log_file(
+        filename,
+        content.encode("utf-8", errors="replace"),
+    )
+
+    if error:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "error": error},
+        )
+
+    return {
+        "status": "ok",
+        "filename": filename,
+        "event_count": count,
+    }
+
+@app.post("/logs/clear")
+def clear_logs():
+    clear_log_events()
+
+    return {"status": "cleared"}
+
+@app.post("/app/quit")
+def quit_app():
+    """
+    Stop the backend (and the uvicorn reloader parent, if any).
+    """
+    threading.Timer(
+        0.5,
+        os._exit,
+        args=(0,),
+    ).start()
+
+    return {"status": "quitting"}
+
+
 dns_thread = threading.Thread(
     target=start_dns_monitor,
     daemon=True,
 )
 dns_thread.start()
 
+packet_thread = threading.Thread(
+    target=start_packet_monitor,
+    daemon=True,
+)
+packet_thread.start()
+
+
 @app.get("/events/live")
 def get_live_events():
-    return collect_live_connections()
+    # Socket-table events (TCP/UDP with process names) plus
+    # packet-level flows for every other IP protocol the OS
+    # table cannot see (ICMP, IGMP, GRE, ESP, ...).
+    return collect_live_connections() + get_packet_flow_events()
 
 @app.get("/dns")
 def get_dns_history():
@@ -175,6 +180,8 @@ def clear_history():
     clear_event_history()
     clear_browser_events()
     clear_dns_records()
+    clear_packet_flows()
+    clear_log_events()
 
     return {
         "status": "cleared"

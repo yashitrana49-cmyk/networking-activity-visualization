@@ -34,6 +34,9 @@
   --badge-amber-fg: #fcd34d;
   --badge-amber-bg: rgba(251, 191, 36, 0.12);
   --badge-amber-border: rgba(251, 191, 36, 0.32);
+  --badge-rose-fg: #fda4af;
+  --badge-rose-bg: rgba(244, 63, 94, 0.12);
+  --badge-rose-border: rgba(244, 63, 94, 0.32);
   --badge-gray-fg: #94a3b8;
   --badge-gray-bg: rgba(148, 163, 184, 0.1);
   --badge-gray-border: rgba(148, 163, 184, 0.24);
@@ -79,9 +82,12 @@
     --badge-violet-fg: #6d28d9;
     --badge-violet-bg: rgba(124, 58, 237, 0.1);
     --badge-violet-border: rgba(124, 58, 237, 0.3);
-    --badge-amber-fg: #b45309;
-    --badge-amber-bg: rgba(245, 158, 11, 0.14);
-    --badge-amber-border: rgba(245, 158, 11, 0.35);
+  --badge-amber-fg: #b45309;
+  --badge-amber-bg: rgba(245, 158, 11, 0.14);
+  --badge-amber-border: rgba(245, 158, 11, 0.35);
+  --badge-rose-fg: #be123c;
+  --badge-rose-bg: rgba(225, 29, 72, 0.12);
+  --badge-rose-border: rgba(225, 29, 72, 0.32);
     --badge-gray-fg: #475569;
     --badge-gray-bg: rgba(100, 116, 139, 0.1);
     --badge-gray-border: rgba(100, 116, 139, 0.28);
@@ -366,6 +372,166 @@ main {
   font-size: 14px;
 }
 
+/* --- Notice banner (uploads, clears) --- */
+
+.notice-banner {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+/* ============================================================
+   NAVBAR
+   ============================================================ */
+
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+
+  margin: -28px -28px 24px;
+  padding: 12px 28px;
+
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.navbar-logo {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  flex: none;
+}
+
+.navbar-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+}
+
+.navbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.navbar-file-input {
+  display: none;
+}
+
+.navbar-log-chip {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn-quit {
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+}
+
+.btn-quit:hover {
+  background: var(--danger-bg);
+}
+
+/* ============================================================
+   QUIT OVERLAY
+   ============================================================ */
+
+.quit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+
+  display: grid;
+  place-items: center;
+
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.quit-card {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+
+  max-width: 380px;
+  padding: 32px 36px;
+  text-align: center;
+
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.quit-card h2 {
+  font-size: 18px;
+}
+
+.quit-card p {
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.quit-spinner {
+  width: 22px;
+  height: 22px;
+  margin-bottom: 6px;
+
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+
+  animation: quit-spin 0.9s linear infinite;
+}
+
+@keyframes quit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* --- Status pill (header, Live/Sample) --- */
 
 .status-pill {
@@ -546,6 +712,12 @@ tr.row-new td {
   color: var(--badge-green-fg);
   background: var(--badge-green-bg);
   border-color: var(--badge-green-border);
+}
+
+.badge-rose {
+  color: var(--badge-rose-fg);
+  background: var(--badge-rose-bg);
+  border-color: var(--badge-rose-border);
 }
 
 .badge-blue {

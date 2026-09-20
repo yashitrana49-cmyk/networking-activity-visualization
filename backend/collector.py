@@ -229,6 +229,11 @@ def collect_live_connections():
 
                 "port": connection.raddr.port,
 
+                # Local port: lets the UI tell apart parallel
+                # connections to the same destination that
+                # would otherwise share a row key.
+                "local_port": connection.laddr.port if connection.laddr else 0,
+
                 "state": get_connection_state(
                     connection
                 ),
