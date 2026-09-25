@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import dagre from "@dagrejs/dagre";
 
@@ -130,15 +130,36 @@ function NetworkGraph({ events, browserEvents, dnsEvents }: NetworkGraphProps) {
   );
 }
 
+/**
+ * Content signature of the graph inputs. Dagre positions only
+ * depend on which nodes/edges exist (not on array identity), so
+ * relayout must be gated on this — otherwise per-second polling
+ * or row-flash timers would thrash the layout and move every
+ * node while the camera stays put ("the graph disappeared").
+ */
+function layoutSignature(
+  rawNodes: Omit<EntityNodeType, "position">[],
+  rawEdges: Edge[],
+): string {
+  return `${rawNodes.map((node) => node.id).join("|")}#${rawEdges
+    .map((edge) => edge.id)
+    .join("|")}`;
+}
+
 function NetworkGraphInner({
   events,
   browserEvents,
   dnsEvents,
 }: NetworkGraphProps) {
   const [layoutNonce, setLayoutNonce] = useState(0);
-  const [nodes, setNodes] = useState<EntityNodeType[]>([]);
+  // Nodes plus a version that increments only on content-driven
+  // relayouts. The fit effect keys on the version, so panning,
+  // zooming and node drags never yank the camera back.
+  const [layout, setLayout] = useState<{
+    nodes: EntityNodeType[];
+    version: number;
+  }>({ nodes: [], version: 0 });
   const { fitView } = useReactFlow();
-  const didInitialFit = useRef(false);
   // ============================================================
   // NODES
   // ============================================================
@@ -321,38 +342,49 @@ function NetworkGraphInner({
   // ------------------------------------------------------------
 
   const [prevLayoutInputs, setPrevLayoutInputs] = useState({
-    rawNodes,
-    rawEdges,
+    signature: layoutSignature(rawNodes, rawEdges),
     layoutNonce,
   });
 
+  const signature = layoutSignature(rawNodes, rawEdges);
+
   if (
-    prevLayoutInputs.rawNodes !== rawNodes ||
-    prevLayoutInputs.rawEdges !== rawEdges ||
+    prevLayoutInputs.signature !== signature ||
     prevLayoutInputs.layoutNonce !== layoutNonce
   ) {
-    setPrevLayoutInputs({ rawNodes, rawEdges, layoutNonce });
+    setPrevLayoutInputs({ signature, layoutNonce });
 
-    setNodes(layoutNodes(rawNodes, rawEdges));
+    setLayout((current) => ({
+      nodes: layoutNodes(rawNodes, rawEdges),
+      version: current.version + 1,
+    }));
   }
+
+  const nodes = layout.nodes;
 
   const onNodesChange: OnNodesChange<EntityNodeType> = useCallback(
     (changes) => {
-      setNodes((current) => applyNodeChanges(changes, current));
+      setLayout((current) => ({
+        ...current,
+        nodes: applyNodeChanges(changes, current.nodes),
+      }));
     },
     [],
   );
 
-  // Fit once after the first layout lands.
+  // Re-fit after any content-driven relayout so a growing graph
+  // (new connections, DNS entries, a large uploaded log) stays
+  // fully in frame instead of flying off-screen. The version only
+  // moves on relayout, never on pan/zoom/drag.
   useEffect(() => {
-    if (nodes.length > 0 && !didInitialFit.current) {
-      didInitialFit.current = true;
-
-      requestAnimationFrame(() => {
-        fitView({ padding: 0.15, duration: 300 });
-      });
+    if (nodes.length === 0) {
+      return;
     }
-  }, [nodes, fitView]);
+
+    requestAnimationFrame(() => {
+      fitView({ padding: 0.15, duration: 300 });
+    });
+  }, [layout.version, fitView, nodes.length]);
 
   // ------------------------------------------------------------
   // HOVER HIGHLIGHTING
@@ -455,15 +487,9 @@ function NetworkGraphInner({
         <button
           type="button"
           className="graph-legend-reset"
-          onClick={() => {
-            setLayoutNonce((value) => value + 1);
-
-            // Re-fit once the relayout has committed, so nodes
-            // that moved out of view come back into frame.
-            setTimeout(() => {
-              fitView({ padding: 0.15, duration: 300 });
-            }, 60);
-          }}
+          // Bumping the nonce triggers a relayout, and the
+          // effect above re-fits the view once it commits.
+          onClick={() => setLayoutNonce((value) => value + 1)}
         >
           Reset layout
         </button>

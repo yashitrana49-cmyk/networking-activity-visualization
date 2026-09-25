@@ -1,7 +1,7 @@
 import NetworkGraph from "./components/NetworkGraph";
 import NavBar from "./components/NavBar";
 import QuitOverlay from "./components/QuitOverlay";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getLiveEvents,
   getLogEvents,
@@ -286,28 +286,38 @@ function App() {
     setQuitting(true);
   };
 
-  const processes = [
-    "All",
-    ...new Set(events.map((event) => event.process_name)),
-  ];
+  const processes = useMemo(
+    () => [
+      "All",
+      ...new Set(events.map((event) => event.process_name)),
+    ],
+    [events],
+  );
 
-  const visibleEvents = [...events]
-    .filter((event) => {
-      const address = event.destination_ip.trim();
+  // Memoized so per-second polling re-renders (and the row-flash
+  // timer) hand NetworkGraph/WorldMap a stable array identity —
+  // churn here re-triggers downstream work on every tick.
+  const visibleEvents = useMemo(
+    () =>
+      [...events]
+        .filter((event) => {
+          const address = event.destination_ip.trim();
 
-      const matchesProcess =
-        selectedProcess === "All" || event.process_name === selectedProcess;
+          const matchesProcess =
+            selectedProcess === "All" || event.process_name === selectedProcess;
 
-      const isPrivate = isPrivateOrLocalIp(address);
+          const isPrivate = isPrivateOrLocalIp(address);
 
-      const matchesLocalFilter = showLocalConnections || !isPrivate;
+          const matchesLocalFilter = showLocalConnections || !isPrivate;
 
-      return matchesProcess && matchesLocalFilter;
-    })
-    .sort(
-      (a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-    );
+          return matchesProcess && matchesLocalFilter;
+        })
+        .sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        ),
+    [events, selectedProcess, showLocalConnections],
+  );
 
     useEffect(() => {
       const container = logsContainerRef.current;
